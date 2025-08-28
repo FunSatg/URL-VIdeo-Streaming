@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Online Video Player</title>
+  <style>
+    body { background:#111; color:#fff; font-family:system-ui, Arial, sans-serif; margin:0; padding:24px; text-align:center; }
+    h1 { margin: 0 0 16px; }
+    .bar { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-bottom:16px; }
+    input[type="text"] { width: min(800px, 90vw); padding:12px; border-radius:10px; border:none; outline:none; }
+    button { padding:12px 16px; border:none; border-radius:10px; background:#00bcd4; color:#fff; cursor:pointer; }
+    button:hover { background:#0097a7; }
+    #player { margin-top:18px; display:flex; justify-content:center; }
+    video, iframe { width:min(100%, 900px); height: min(60vh, 520px); background:#000; border-radius:12px; box-shadow:0 0 20px rgba(255,255,255,0.2); }
+    .hint { opacity:0.8; margin-top:10px; font-size:14px; }
+    .err { color:#ff8a80; margin-top:10px; }
+  </style>
+</head>
+<body>
+  <h1>🎬 Online Video Player</h1>
+  <div class="bar">
+    <input id="url" type="text" placeholder="Paste video URL (mp4, webm, m3u8, mkv, YouTube)"/>
+    <button id="playBtn">Play</button>
+  </div>
+  <div id="player"></div>
+  <div class="hint">Tip: For MKV/odd formats, the server will remux to MP4. Replace BACKEND constant with your Render URL.</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script>
+    // UPDATE this to your Render backend URL after deploy:
+    const BACKEND = "https://REPLACE_WITH_YOUR_RENDER_URL";
+
+    const input = document.getElementById("url");
+    const playerDiv = document.getElementById("player");
+    const btn = document.getElementById("playBtn");
+
+    function isYouTube(u){ return /youtube\.com|youtu\.be/.test(u); }
+    function ytId(u){
+      try {
+        const url = new URL(u);
+        if (url.hostname.includes("youtu.be")) return url.pathname.slice(1);
+        if (url.searchParams.get("v")) return url.searchParams.get("v");
+      } catch {}
+      return "";
+    }
+    function ext(u){
+      const m = /\.([a-z0-9]+)(\?|#|$)/i.exec(u);
+      return m ? m[1].toLowerCase() : "";
+    }
+
+    function clearPlayer(){ playerDiv.innerHTML = ""; }
+
+    function play() {
+      const raw = input.value.trim();
+      if (!raw) return;
+      clearPlayer();
+
+      // YouTube
+      if (isYouTube(raw)) {
+        const id = ytId(raw);
+        if (!id) { playerDiv.innerHTML = '<div class="err">Invalid YouTube link.</div>'; return; }
+        const iframe = document.createElement("iframe");
+        iframe.src = `https://www.youtube.com/embed/${id}`;
+        iframe.referrerPolicy = "origin-when-cross-origin";
+        iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+        iframe.allowFullscreen = true;
+        playerDiv.appendChild(iframe);
+        return;
+      }
+
+      const e = ext(raw);
+
+      // HLS (.m3u8) → use proxy to bypass CORS and support Range
+      if (e === "m3u8") {
+        const video = document.createElement("video");
+        video.controls = true;
+        video.autoplay = true;
+        video.playsInline = true;
+        playerDiv.appendChild(video);
+
+        const prox = `${BACKEND}/play?url=${encodeURIComponent(raw)}`;
+        if (Hls.isSupported()) {
+          const hls = new Hls();
+          hls.loadSource(prox);
+          hls.attachMedia(video);
+        } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = prox;
+        } else {
+          playerDiv.innerHTML = '<div class="err">Your browser cannot play HLS.</div>';
+        }
+        return;
+      }
+
+      // MP4/WebM → stream through proxy (gives CORS + Range)
+      if (e === "mp4" || e === "webm") {
+        const video = document.createElement("video");
+        video.controls = true;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.src = `${BACKEND}/play?url=${encodeURIComponent(raw)}`;
+        playerDiv.appendChild(video);
+        return;
+      }
+
+      // MKV/others → try remux
+      const video = document.createElement("video");
+      video.controls = true;
+      video.autoplay = true;
+      video.playsInline = true;
+      video.src = `${BACKEND}/remux?url=${encodeURIComponent(raw)}`;
+      playerDiv.appendChild(video);
+    }
+
+    btn.addEventListener("click", play);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") play(); });
+  </script>
+</body>
+</html>
